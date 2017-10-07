@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 # Joric/bitcoin-dev, june 2012, public domain
+#
 
 import hashlib
 import ctypes
 import ctypes.util
 import sys
+import getpass
 
 ssl = ctypes.cdll.LoadLibrary (ctypes.util.find_library ('ssl') or 'libeay32')
 
@@ -28,9 +30,8 @@ class KEY:
             ssl.EC_KEY_free(self.k)
         self.k = None
 
-    def generate(self, secret=None):
+    def generate(self, secret):
         if secret:
-            self.prikey = secret
             priv_key = ssl.BN_bin2bn(secret, 32, ssl.BN_new())
             group = ssl.EC_KEY_get0_group(self.k)
             pub_key = ssl.EC_POINT_new(group)
@@ -128,31 +129,6 @@ def base58_check_decode(s, version=0):
         raise BaseException('version mismatch')
     return data
 
-def gen_eckey(passphrase=None, secret=None, pkey=None, compressed=False, rounds=1, version=0):
-    k = KEY()
-    if passphrase:
-        secret = passphrase.encode('utf8')
-        for i in xrange(rounds):
-            secret = hashlib.sha256(secret).digest()
-    if pkey:
-        secret = base58_check_decode(pkey, 128+version)
-        compressed = len(secret) == 33
-        secret = secret[0:32]
-    k.generate(secret)
-    k.set_compressed(compressed)
-    return k
-
-def get_addr(k,version=0):
-    pubkey = k.get_pubkey()
-    secret = k.get_secret()
-    hash160 = rhash(pubkey)
-    addr = base58_check_encode(hash160,version)
-    payload = secret
-    if k.compressed:
-        payload = secret + chr(1)
-    pkey = base58_check_encode(payload, 128+version)
-    return addr, pkey
-
 def reencode(pkey,version=0):
     payload = base58_check_decode(pkey,128+version)
     secret = payload[:-1]
@@ -160,29 +136,45 @@ def reencode(pkey,version=0):
     pkey = base58_check_encode(payload, 128+version)
     print get_addr(gen_eckey(pkey))
 
-def test(otherversion):
-    # random compressed
-    print get_addr(gen_eckey(compressed=True,version=otherversion),version=otherversion)
+def gen_eckey(passphrase):
 
-    # uncomment these to create addresses via a different method
-    # random uncompressed
-    #print get_addr(gen_eckey())
-    # by secret
-    #print get_addr(gen_eckey(secret=('%064x' % 0xdeadbabe).decode('hex')))
-    # by passphrase
-    #print get_addr(gen_eckey(passphrase='Satoshi Nakamoto'))
-    # by private key
-    #print get_addr(gen_eckey(pkey='5K1HkbYffstTZDuV4riUWMbAMkQh57b8798uoy9pXYUDYeUHe7F'))
-    #print get_addr(gen_eckey(pkey='L3ATL5R9Exe1ubuAnHVgNgTKZEUKkDvWYAWkLUCyyvzzxRjtgyFe'))
+    hashed_passphrase = hashlib.sha256(passphrase.encode('utf8'))
 
-    # uncomment this to reencode the private keys created by early versions of this script
-    #reencode(sys.argv[1])
+    key = KEY()
+    key.generate(hashed_passphrase.digest())
+    key.set_compressed(False)
+
+    return key
+
+def generate_wallet(passphrase):
+
+    key = gen_eckey(passphrase)
+
+    pubkey = key.get_pubkey()
+    secret = key.get_secret() 
+
+    hash160 = rhash(pubkey)
+    addr = base58_check_encode(hash160)
+    payload = secret
+
+    if key.compressed:
+        payload = secret + chr(1)
+    pkey = base58_check_encode(payload, 128)
+    
+    return {
+        'addr': addr, 
+        'pkey': pkey
+    }
 
 if __name__ == '__main__':
-    import optparse
-    parser = optparse.OptionParser(usage="%prog [options]")
-    parser.add_option("--otherversion", dest="otherversion", default=0,
-                    help="Generate address with different version number")
-    (options, args) = parser.parse_args()
- 
-    test(int(options.otherversion))
+    pass1 = getpass.getpass('Passphrase:')
+    pass2 = getpass.getpass('Passphrase:')
+    pass3 = getpass.getpass('Passphrase:')
+
+    if pass1 != pass2:
+        print "Non-matching passphrases!"
+    elif pass1 != pass3:
+        print "Non-matching passphrases!"
+    else:
+        wallet = generate_wallet(pass1)
+        print "Address:", wallet['addr']
